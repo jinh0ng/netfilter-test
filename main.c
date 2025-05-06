@@ -6,8 +6,30 @@
 #include <linux/types.h>
 #include <linux/netfilter.h> /* for NF_ACCEPT */
 #include <errno.h>
+#include <string.h>
 
 #include <libnetfilter_queue/libnetfilter_queue.h>
+
+char *host;
+u_int32_t verdict;
+
+void usage()
+{
+	printf("syntax : netfilter-test <host>\n");
+	printf("sample : netfilter-test test.gilgil.net\n");
+}
+
+void dump(unsigned char *buf, int size)
+{
+	int i;
+	for (i = 0; i < size; i++)
+	{
+		if (i != 0 && i % 16 == 0)
+			printf("\n");
+		printf("%02X ", buf[i]);
+	}
+	printf("\n");
+}
 
 /* returns packet id */
 static uint32_t print_pkt(struct nfq_data *tb)
@@ -69,19 +91,70 @@ static uint32_t print_pkt(struct nfq_data *tb)
 
 	ret = nfq_get_payload(tb, &data);
 	if (ret >= 0)
-		printf("payload_len=%d ", ret);
+	{
+		u_int32_t iphdr_len = data[0] & 0x0f;
+		iphdr_len = iphdr_len * 4;
 
+		u_int32_t tcphdr_len = data[iphdr_len + 12] & 0xf0;
+		tcphdr_len = tcphdr_len >> 4;
+		tcphdr_len = tcphdr_len * 4;
+
+		u_int32_t payload_len = ret - iphdr_len - tcphdr_len;
+		// u_int32_t payload_offset = iphdr_len + tcphdr_len;
+		// u_int32_t payload_end = payload_offset + payload_len;
+
+		unsigned char *payload = data + iphdr_len + tcphdr_len;
+		if (payload_len > 0)
+		{
+			char *host_ptr = NULL;
+			unsigned char *p = payload;
+			unsigned char *end = payload + payload_len;
+			const char header[] = "Host: ";
+			size_t header_len = sizeof(header) - 1;
+
+			/* payload 내에서 "Host: " 위치 찾기 */
+			for (; p + header_len <= end; ++p)
+			{
+				if (memcmp(p, header, header_len) == 0)
+				{
+					host_ptr = (char *)p + header_len; // "Host: " 바로 뒤로 이동
+					break;
+				}
+			}
+			if (host_ptr)
+			{
+				// hostname과 비교
+				if (strncmp(host_ptr, host, strlen(host)) == 0)
+				{
+					// 패킷 차단
+					verdict = NF_DROP;
+					printf("BLOCKED\n");
+				}
+				else
+				{
+					// 패킷 허용
+					verdict = NF_ACCEPT;
+					printf("ACCEPTED\n");
+				}
+			}
+			printf("payload_len=%d\n", ret);
+		}
+	}
 	fputc('\n', stdout);
 
 	return id;
 }
 
+// NFQUEUE에서 받은 패킷을 처리리
 static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 			  struct nfq_data *nfa, void *data)
 {
 	uint32_t id = print_pkt(nfa);
 	printf("entering callback\n");
-	return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+	int ret = nfq_set_verdict(qh, id, verdict, 0, NULL);
+	verdict = NF_ACCEPT; // 다음 패킷 default값 복원
+	// return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+	return ret;
 }
 
 int main(int argc, char **argv)
@@ -93,15 +166,21 @@ int main(int argc, char **argv)
 	uint32_t queue = 0;
 	char buf[4096] __attribute__((aligned));
 
-	if (argc == 2)
+	host = argv[1];
+	if (argc != 2)
 	{
-		queue = atoi(argv[1]);
-		if (queue > 65535)
-		{
-			fprintf(stderr, "Usage: %s [<0-65535>]\n", argv[0]);
-			exit(EXIT_FAILURE);
-		}
+		usage();
+		exit(1);
 	}
+	// if (argc == 2)
+	// {
+	// 	queue = atoi(argv[1]);
+	// 	if (queue > 65535)
+	// 	{
+	// 		fprintf(stderr, "Usage: %s [<0-65535>]\n", argv[0]);
+	// 		exit(EXIT_FAILURE);
+	// 	}
+	// }
 
 	printf("opening library handle\n");
 	h = nfq_open();
