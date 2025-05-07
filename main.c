@@ -99,16 +99,16 @@ static uint32_t print_pkt(struct nfq_data *tb)
 		tcphdr_len = tcphdr_len >> 4;
 		tcphdr_len = tcphdr_len * 4;
 
-		u_int32_t payload_len = ret - iphdr_len - tcphdr_len;
+		u_int32_t http_len = ret - iphdr_len - tcphdr_len;
 		// u_int32_t payload_offset = iphdr_len + tcphdr_len;
-		// u_int32_t payload_end = payload_offset + payload_len;
+		// u_int32_t payload_end = payload_offset + http_len;
 
-		unsigned char *payload = data + iphdr_len + tcphdr_len;
-		if (payload_len > 0)
+		unsigned char *http_ptr = data + iphdr_len + tcphdr_len;
+		if (http_len > 0)
 		{
 			char *host_ptr = NULL;
-			unsigned char *p = payload;
-			unsigned char *end = payload + payload_len;
+			unsigned char *p = http_ptr;
+			unsigned char *end = http_ptr + http_len;
 			const char header[] = "Host: ";
 			size_t header_len = sizeof(header) - 1;
 
@@ -137,7 +137,7 @@ static uint32_t print_pkt(struct nfq_data *tb)
 					printf("ACCEPTED\n");
 				}
 			}
-			printf("payload_len=%d\n", ret);
+			printf("http_len=%d\n", ret);
 		}
 	}
 	fputc('\n', stdout);
